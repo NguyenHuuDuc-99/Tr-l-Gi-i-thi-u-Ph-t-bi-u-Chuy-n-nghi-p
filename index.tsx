@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 
 // --- Configuration ---
@@ -222,76 +222,38 @@ function App() {
         Context: ${context}
         Tone: ${tone}
         
-        Generate the speech and provide an analysis in ${lang === 'vi' ? 'Vietnamese' : 'English'}.
+        IMPORTANT: Return the response in strict JSON format.
+        Structure:
+        {
+          "speechMarkdown": "The speech text in Markdown format with *[Stage Directions]*...",
+          "analysis": {
+            "rhetoricalDevices": ["Metaphor", "Rule of Three"],
+            "complexityScore": 7,
+            "complexityExplanation": "Explanation of score..."
+          }
+        }
       `;
 
-      let jsonString = "";
+      // Used gemini-3-pro-preview for complex reasoning and structure reliability.
+      // Removed responseSchema to prevent 500 errors; using prompt-based JSON definition with responseMimeType.
+      const response = await ai.models.generateContent({
+        model: "gemini-3-pro-preview",
+        contents: promptText,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.8,
+          responseMimeType: "application/json",
+        },
+      });
 
-      try {
-        // First attempt: Strict Schema
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: promptText,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            temperature: 0.8,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                speechMarkdown: { type: Type.STRING, description: "The speech text in Markdown format with *[Stage Directions]*." },
-                analysis: {
-                  type: Type.OBJECT,
-                  properties: {
-                    rhetoricalDevices: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of rhetorical devices used (e.g. Metaphor, Anaphora)." },
-                    complexityScore: { type: Type.NUMBER, description: "A score from 1-10 indicating linguistic complexity." },
-                    complexityExplanation: { type: Type.STRING, description: "Brief explanation of the score." }
-                  },
-                  required: ["rhetoricalDevices", "complexityScore", "complexityExplanation"]
-                }
-              },
-              required: ["speechMarkdown", "analysis"]
-            },
-          },
-        });
-        jsonString = response.text || "{}";
-      } catch (innerError) {
-        console.warn("Standard generation failed, retrying with fallback...", innerError);
-        
-        // Fallback: Prompt-based JSON without strict schema
-        const fallbackPrompt = `
-          ${promptText}
-          
-          IMPORTANT: Return the response in strict JSON format.
-          Example Structure:
-          {
-            "speechMarkdown": "# Title\\n\\nSpeech content...",
-            "analysis": {
-              "rhetoricalDevices": ["Metaphor", "Rule of Three"],
-              "complexityScore": 7,
-              "complexityExplanation": "Explanation..."
-            }
-          }
-        `;
-        
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: fallbackPrompt,
-            config: {
-                systemInstruction: SYSTEM_INSTRUCTION,
-                temperature: 0.8,
-                responseMimeType: "application/json"
-            }
-        });
-        jsonString = response.text || "{}";
-      }
-
+      const jsonString = response.text || "{}";
       const json = JSON.parse(jsonString);
+      
       if (json.speechMarkdown) {
         setGeneratedSpeech(json.speechMarkdown);
         setAnalysis(json.analysis);
       } else {
-        throw new Error("Invalid response format");
+        throw new Error("Invalid response format received from AI.");
       }
     } catch (err: any) {
       console.error(err);
